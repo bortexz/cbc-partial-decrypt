@@ -1,0 +1,32 @@
+{
+  "name": "aes-cbc-partial-decrypt-stream",
+  "version": "1.0.0",
+  "description": "Returns a stream of partial contents of an AES-CBC encrypted resource",
+  "main": "index.js",
+  "scripts": {
+    "test": "standard && tape test.js"
+  },
+  "keywords": [
+    "aes",
+    "crypto",
+    "partial",
+    "decipher",
+    "cbc"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bertofer/cbc-partial-decrypt"
+  },
+  "author": "Alberto Fernandez",
+  "license": "MIT",
+  "dependencies": {
+    "evp_bytestokey": "^1.0.0",
+    "streamifier": "^0.1.1",
+    "through2": "^2.0.3"
+  },
+  "devDependencies": {
+    "randomstring": "^1.1.5",
+    "standard": "^10.0.2",
+    "tape": "^4.6.3"
+  }
+}
