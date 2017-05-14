@@ -14,7 +14,11 @@ module.exports = PartialDecryptStream
  * previous blocks than the one in `start`.
  * @param opts.start from where of the original file to receive
  * @param opts.end until where of the original file to receive
- * @param opts.mode can be either '128', '192' or '256'
+ * @param opts.mode the algorithm to pass to the internal resource.
+ * Currently only aes-cbc-{128|192|256} supported.
+ * @param opts.keyLength The original keylength to use, when generating the
+ * Buffer from the password if string is specified. optional if password already
+ * a Buffer
  * @param opts.password String or buffer
  * @param opts.iv The initial IV used to encrypt, if any
  */
