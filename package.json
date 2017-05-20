@@ -1,6 +1,6 @@
 {
   "name": "cbc-partial-decrypt",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Returns a stream of partial contents of an AES-CBC encrypted resource",
   "main": "index.js",
   "scripts": {
