@@ -1,38 +1,35 @@
 var crypto = require('crypto')
 var evp = require('evp_bytestokey')
-var through = require('through2')
+var Readable = require('readable-stream').Readable
+const inherits = require('util').inherits
 
 module.exports = PartialDecryptStream
 
-/**
- * Returns a stream of partially decrypted content, originally encrypted with
- * aes-cbc mode
- * @param opts options object
- * @param opts.encrypted { function } function that should return a stream to
- * the encrypted resource, and should have a signature like
- * createReadStream of fs. Because of how aes-cbc works, it will ask for
- * previous blocks than the one in `start`.
- * @param opts.start from where of the original file to receive
- * @param opts.end until where of the original file to receive
- * @param opts.mode the algorithm to pass to the internal resource.
- * Currently only aes-cbc-{128|192|256} supported.
- * @param opts.keyLength The original keylength to use, when generating the
- * Buffer from the password if string is specified. optional if password already
- * a Buffer
- * @param opts.password String or buffer
- * @param opts.iv The initial IV used to encrypt, if any
- */
+inherits(PartialDecryptStream, Readable)
+
 function PartialDecryptStream (opts) {
+  if (!(this instanceof PartialDecryptStream)) {
+    return new PartialDecryptStream(opts)
+  }
+  Readable.call(this, opts)
+
   if (!opts || !opts.password || !opts.mode ||
-    !(typeof opts.encrypted === 'function')
-  ) {
+    !(typeof opts.encrypted === 'function')) {
     throw new Error('Incorrect options')
   }
 
-  if (!opts.start) opts.start = 0
+  this._destroyed = false
+
+  this._mode = opts.mode
+  this._start = opts.start || 0
+  this._end = opts.end
+
+  this._toSkip = this._start % 16
+  this._left = this._end ? this._end - this._start + 1 : Infinity
 
   var keys = evp(opts.password, false, opts.keyLength, 16)
-  var password = Buffer.isBuffer(opts.password)
+
+  this._password = Buffer.isBuffer(opts.password)
     ? opts.password
     : Buffer.from(keys.key)
 
@@ -40,55 +37,65 @@ function PartialDecryptStream (opts) {
     ? Buffer.isBuffer(opts.iv) ? opts.iv : Buffer.from(opts.iv)
     : Buffer.from(keys.iv)
 
-  var start = Math.max(opts.start - (opts.start % 16) - 16, 0)
-  var end = opts.end
-    ? (opts.end + 1) % 16 === 0 ? opts.end : Math.floor(opts.end / 16) * 16 + 15
+  var needIvFromFile = this._start >= 16
+  this._ivLength = needIvFromFile ? 0 : 16
+  this._iv = needIvFromFile ? new Uint8Array(16) : initIv
+
+  var sourceStart = Math.max(this._start - (this._start % 16) - 16, 0)
+  var sourceEnd = opts.end
+    ? (opts.end + 1) % 16 === 0
+      ? opts.end
+      : Math.floor(opts.end / 16) * 16 + 15
     : undefined
 
-  // Prepare output stream
-  var toSkip = opts.start % 16
-  var left = opts.end
-    ? opts.end - opts.start + 1
-    : Infinity
+  this._sourceStream = opts.encrypted({ start: sourceStart, end: sourceEnd })
+}
 
-  var outputStream = through(function (chunk, _, cb) {
-    if (toSkip > 0) {
-      var skipLength = Math.min(chunk.length, toSkip)
-      chunk = chunk.slice(skipLength)
-      toSkip -= skipLength
-      if (chunk.length === 0) return
-    }
-    if (chunk.length > left) chunk = chunk.slice(0, left)
-    left -= chunk.length
-    cb(null, chunk)
-  })
+PartialDecryptStream.prototype.destroy = function (err) {
+  if (typeof this._sourceStream.destroy === 'function') {
+    this._sourceStream.destroy(err)
+  }
+  this._destroyed = true
+  if (err) this.emit('error', err)
+  this.emit('close')
+}
 
-  var needIvFromFile = opts.start >= 16
-  var ivLength = needIvFromFile ? 0 : 16
-  var iv = needIvFromFile ? new Uint8Array(16) : initIv
+PartialDecryptStream.prototype._read = function () {
+  this._sourceStream.on('data', chunk => {
+    if (this._ivLength < 16) {
+      var ivPiece = Math.min(chunk.length, 16 - this._ivLength)
+      this._iv.set(chunk.slice(0, ivPiece), this._ivLength)
+      this._ivLength += ivPiece
+      if (this._ivLength !== 16) return // Not finished reading IV
 
-  // read from the source
-  var readFileStream = opts.encrypted({ start: start, end: end })
-  var decipherStream
-  readFileStream.on('data', function (chunk) {
-    if (ivLength < 16) {
-      var ivPiece = Math.min(chunk.length, 16 - ivLength)
-      iv.set(chunk.slice(0, ivPiece), ivLength)
-      ivLength += ivPiece
-      if (ivLength !== 16) return // Not finished reading IV
-
-      iv = Buffer.from(iv)
+      this._iv = Buffer.from(this._iv)
       chunk = chunk.slice(ivPiece)
     }
-    if (!decipherStream) {
-      decipherStream = crypto
-        .createDecipheriv(opts.mode, password, iv)
+    if (!this._decipherStream) {
+      this._decipherStream = crypto
+        .createDecipheriv(this._mode, this._password, this._iv)
         .setAutoPadding(false)
 
-      readFileStream.on('end', () => decipherStream.end())
-      decipherStream.pipe(outputStream)
+      this._sourceStream.on('end', () => this._decipherStream.end())
+      this._output()
     }
-    decipherStream.write(chunk)
+    this._decipherStream.write(chunk)
   })
-  return outputStream
+}
+
+PartialDecryptStream.prototype._output = function () {
+  this._decipherStream.on('data', chunk => {
+    console.log(this._toSkip)
+    if (this._toSkip > 0) {
+      var skipLength = Math.min(chunk.length, this._toSkip)
+      chunk = chunk.slice(skipLength)
+      this._toSkip -= skipLength
+      if (chunk.length === 0) return
+    }
+    if (chunk.length > this._left) chunk = chunk.slice(0, this._left)
+    this._left -= chunk.length
+    this.push(chunk)
+  })
+
+  this._decipherStream.on('end', () => this.push(null))
 }

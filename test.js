@@ -63,7 +63,7 @@ test('should work with whole content when not multiple 16', t => {
   stream.on('data', chunk => {
     string += chunk.toString('utf8')
   })
-  stream.on('end', () => t.ok(string, toEncrypt,
+  stream.on('end', () => t.equal(string, toEncrypt,
       'Decrypted should be equal to the slice of toEncrypt asked')
     )
 })

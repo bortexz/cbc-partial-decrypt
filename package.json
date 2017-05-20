@@ -21,12 +21,12 @@
   "license": "MIT",
   "dependencies": {
     "evp_bytestokey": "^1.0.0",
-    "streamifier": "^0.1.1",
-    "through2": "^2.0.3"
+    "readable-stream": "^2.2.9"
   },
   "devDependencies": {
     "randomstring": "^1.1.5",
     "standard": "^10.0.2",
+    "streamifier": "^0.1.1",
     "tape": "^4.6.3"
   }
 }
