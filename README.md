@@ -5,11 +5,11 @@ In CBC mode, the only thing needed to decrypt a specific block, is the ciphertex
 
 This library takes advantage of that, and implements partial decryption for AES-CBC with 128, 192 or 256 key length. Although other algorithms should be possible to implement as well.
 
-It will return a stream that can be read, and will emit the resource decrypted from byte `start` to byte `end` specified.
+It creates a stream that can be read, and will emit the resource decrypted from byte `start` to byte `end` (inclusive) specified.
 
 # How to use
 ```javascript
-var partialDecryptStream = require('cbc-partial-decrypt')
+var PartialDecryptStream = require('cbc-partial-decrypt')
 
 var opts = {
   mode: 'aes-cbc-256', // which encryption algorithm and mode to use, passed directly to internal decipher
@@ -27,7 +27,8 @@ var opts = {
   }
 }
 
-partialDecryptStream(opts).pipe(process.stdout) // prints partial resource
+var partialDecrypt = new PartialDecryptStream(opts)
+partialDecrypt.pipe(process.stdout)
 ```
 
 # Notes
