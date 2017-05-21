@@ -18,6 +18,8 @@ function PartialDecryptStream (opts) {
     throw new Error('Incorrect options')
   }
 
+  this._sourceEnded = false
+  this._decipherEnded = false
   this._destroyed = false
 
   this._mode = opts.mode
@@ -49,53 +51,73 @@ function PartialDecryptStream (opts) {
     : undefined
 
   this._sourceStream = opts.encrypted({ start: sourceStart, end: sourceEnd })
+
+  var self = this
+  this._sourceStream.on('end', function () {
+    self._sourceEnded = true
+  })
+  this._sourceStream.on('readable', function () {
+    self._read()
+  })
 }
 
-PartialDecryptStream.prototype.destroy = function (err) {
+PartialDecryptStream.prototype.destroy = function (err, onclose) {
   if (typeof this._sourceStream.destroy === 'function') {
     this._sourceStream.destroy(err)
   }
+  if (this._decipherStream) this._decipherStream.end()
+
   this._destroyed = true
+
   if (err) this.emit('error', err)
   this.emit('close')
+
+  if (onclose) onclose()
 }
 
-PartialDecryptStream.prototype._read = function () {
-  this._sourceStream.on('data', chunk => {
+PartialDecryptStream.prototype._read = function (size) {
+  if (this._destroyed) return
+
+  if (!this.sourceEnd) {
+    var srcChunk = this._sourceStream.read(size)
+    if (!srcChunk || srcChunk.length === 0) return
+
     if (this._ivLength < 16) {
-      var ivPiece = Math.min(chunk.length, 16 - this._ivLength)
-      this._iv.set(chunk.slice(0, ivPiece), this._ivLength)
+      var ivPiece = Math.min(srcChunk.length, 16 - this._ivLength)
+      this._iv.set(srcChunk.slice(0, ivPiece), this._ivLength)
       this._ivLength += ivPiece
       if (this._ivLength !== 16) return // Not finished reading IV
 
       this._iv = Buffer.from(this._iv)
-      chunk = chunk.slice(ivPiece)
+      srcChunk = srcChunk.slice(ivPiece)
     }
+
     if (!this._decipherStream) {
       this._decipherStream = crypto
         .createDecipheriv(this._mode, this._password, this._iv)
         .setAutoPadding(false)
 
-      this._sourceStream.on('end', () => this._decipherStream.end())
-      this._output()
+      var self = this
+      this._decipherStream.on('end', function () {
+        self.push(null)
+        self._decipherEnded = true
+      })
     }
-    this._decipherStream.write(chunk)
-  })
-}
+    this._decipherStream.write(srcChunk)
+  }
 
-PartialDecryptStream.prototype._output = function () {
-  this._decipherStream.on('data', chunk => {
-    console.log(this._toSkip)
+  if (this._decipherStream && !this._decipherEnded) {
+    var decryptChunk = this._decipherStream.read()
+    if (!decryptChunk || decryptChunk.length === 0) return
     if (this._toSkip > 0) {
-      var skipLength = Math.min(chunk.length, this._toSkip)
-      chunk = chunk.slice(skipLength)
+      var skipLength = Math.min(decryptChunk.length, this._toSkip)
+      decryptChunk = decryptChunk.slice(skipLength)
       this._toSkip -= skipLength
-      if (chunk.length === 0) return
+      if (decryptChunk.length === 0) return
     }
-    if (chunk.length > this._left) chunk = chunk.slice(0, this._left)
-    this._left -= chunk.length
-    this.push(chunk)
-  })
-
-  this._decipherStream.on('end', () => this.push(null))
+    if (decryptChunk.length > this._left) decryptChunk = decryptChunk.slice(0, this._left)
+    this._left -= decryptChunk.length
+    this.push(decryptChunk)
+    if (this._left === 0) this.push(null)
+  }
 }
